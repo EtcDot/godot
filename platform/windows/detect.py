@@ -1,213 +1,280 @@
-
-
+import methods
 import os
-
-import sys	
+import sys
 
 
 def is_active():
-	return True
-        
+    return True
+
+
 def get_name():
-        return "Windows"
+    return "Windows"
+
 
 def can_build():
-	
-	
-	if (os.name=="nt"):
-		#building natively on windows!
-		if (os.getenv("VSINSTALLDIR")):
-			return True 
-		else:
-			print("MSVC Not detected, attempting mingw.")
-			return True
-			
-			
-			
-	if (os.name=="posix"):
-	
-		if os.system("i586-mingw32msvc-gcc --version") == 0:
-			return True
 
-			
-	return False
-		
+    if (os.name == "nt"):
+        # Building natively on Windows
+        if (os.getenv("VCINSTALLDIR")): # MSVC
+            return True
+
+        print("MSVC not detected (no VCINSTALLDIR environment variable), attempting MinGW.")
+        mingw32 = ""
+        mingw64 = ""
+        if (os.getenv("MINGW32_PREFIX")):
+            mingw32 = os.getenv("MINGW32_PREFIX")
+        if (os.getenv("MINGW64_PREFIX")):
+            mingw64 = os.getenv("MINGW64_PREFIX")
+
+        test = "gcc --version > NUL 2>&1"
+        if (os.system(test) == 0 or os.system(mingw32 + test) == 0 or os.system(mingw64 + test) == 0):
+            return True
+
+    if (os.name == "posix"):
+        # Cross-compiling with MinGW-w64 (old MinGW32 is not supported)
+        mingw32 = "i686-w64-mingw32-"
+        mingw64 = "x86_64-w64-mingw32-"
+
+        if (os.getenv("MINGW32_PREFIX")):
+            mingw32 = os.getenv("MINGW32_PREFIX")
+        if (os.getenv("MINGW64_PREFIX")):
+            mingw64 = os.getenv("MINGW64_PREFIX")
+
+        test = "gcc --version > /dev/null 2>&1"
+        if (os.system(mingw64 + test) == 0 or os.system(mingw32 + test) == 0):
+            return True
+
+    return False
+
+
 def get_opts():
+    from SCons.Variables import BoolVariable, EnumVariable
 
-	mwp=""
-	mwp64=""
-	if (os.name!="nt"):
-		mwp="i586-mingw32msvc-"
-		mwp64="x86_64-w64-mingw32-"
+    mingw32 = ""
+    mingw64 = ""
+    if (os.name == "posix"):
+        mingw32 = "i686-w64-mingw32-"
+        mingw64 = "x86_64-w64-mingw32-"
 
-	return [
-		('force_64_bits','Force 64 bits binary','no'),
-		('force_32_bits','Force 32 bits binary','no'),
-		('mingw_prefix','Mingw Prefix',mwp),
-		('mingw_prefix_64','Mingw Prefix 64 bits',mwp64),
-	]
-  
+    if (os.getenv("MINGW32_PREFIX")):
+        mingw32 = os.getenv("MINGW32_PREFIX")
+    if (os.getenv("MINGW64_PREFIX")):
+        mingw64 = os.getenv("MINGW64_PREFIX")
+
+    return [
+        ('mingw_prefix_32', 'MinGW prefix (Win32)', mingw32),
+        ('mingw_prefix_64', 'MinGW prefix (Win64)', mingw64),
+        EnumVariable('debug_symbols', 'Add debug symbols to release version', 'yes', ('yes', 'no', 'full')),
+    ]
+
+
 def get_flags():
 
-	return [
-		('freetype','builtin'), #use builtin freetype
-                ('openssl','builtin'), #use builtin openssl
-        ]
-			
+    return [
+    ]
+
+
+def build_res_file(target, source, env):
+
+    if (env["bits"] == "32"):
+        cmdbase = env['mingw_prefix_32']
+    else:
+        cmdbase = env['mingw_prefix_64']
+    cmdbase = cmdbase + 'windres --include-dir . '
+    import subprocess
+    for x in range(len(source)):
+        cmd = cmdbase + '-i ' + str(source[x]) + ' -o ' + str(target[x])
+        try:
+            out = subprocess.Popen(cmd, shell=True, stderr=subprocess.PIPE).communicate()
+            if len(out[1]):
+                return 1
+        except:
+            return 1
+    return 0
 
 
 def configure(env):
 
-	if os.name == "posix":
-		env['OBJSUFFIX'] = ".win"+env['OBJSUFFIX']
-		env['LIBSUFFIX'] = ".win"+env['LIBSUFFIX']
+    env.Append(CPPPATH=['#platform/windows'])
 
-	env.Append(CPPPATH=['#platform/windows'])
+    # Targeted Windows version: 7 (and later), minimum supported version
+    # XP support dropped after EOL due to missing API for IPv6 and other issues
+    # Vista support dropped after EOL due to GH-10243
+    winver = "0x0601"
 
-	if (env["tools"]=="no"):
-		#no tools suffix
-		env['OBJSUFFIX'] = ".nt"+env['OBJSUFFIX']
-		#env['LIBSUFFIX'] = ".nt"+env['LIBSUFFIX']
-		env['platform_libsuffix'] = ".nt"+env['LIBSUFFIX']
+    if (os.name == "nt" and os.getenv("VCINSTALLDIR")): # MSVC
 
+        env['ENV']['TMP'] = os.environ['TMP']
 
+        ## Build type
 
-	if (os.name=="nt" and os.getenv("VSINSTALLDIR")!=None):
-		#build using visual studio
-		env['ENV']['TMP'] = os.environ['TMP']
-		env.Append(CPPPATH=['#platform/windows/include'])
-		env.Append(LIBPATH=['#platform/windows/lib'])
+        if (env["target"] == "release"):
+            env.Append(CCFLAGS=['/O2'])
+            env.Append(LINKFLAGS=['/SUBSYSTEM:WINDOWS'])
+            env.Append(LINKFLAGS=['/ENTRY:mainCRTStartup'])
 
-		if (env["freetype"]!="no"):
-			env.Append(CCFLAGS=['/DFREETYPE_ENABLED'])
-			env.Append(CPPPATH=['#tools/freetype'])
-			env.Append(CPPPATH=['#tools/freetype/freetype/include'])
+        elif (env["target"] == "release_debug"):
+            env.Append(CCFLAGS=['/O2', '/DDEBUG_ENABLED'])
+            env.Append(LINKFLAGS=['/SUBSYSTEM:CONSOLE'])
 
-		if (env["target"]=="release"):
+        elif (env["target"] == "debug_release"):
+            env.Append(CCFLAGS=['/Z7', '/Od'])
+            env.Append(LINKFLAGS=['/DEBUG'])
+            env.Append(LINKFLAGS=['/SUBSYSTEM:WINDOWS'])
+            env.Append(LINKFLAGS=['/ENTRY:mainCRTStartup'])
 
-			env.Append(CCFLAGS=['/O2'])
-			env.Append(LINKFLAGS=['/SUBSYSTEM:WINDOWS'])
-			env.Append(LINKFLAGS=['/ENTRY:mainCRTStartup'])
+        elif (env["target"] == "debug"):
+            env.Append(CCFLAGS=['/Z7', '/DDEBUG_ENABLED', '/DDEBUG_MEMORY_ENABLED', '/DD3D_DEBUG_INFO', '/Od', '/EHsc'])
+            env.Append(LINKFLAGS=['/SUBSYSTEM:CONSOLE'])
+            env.Append(LINKFLAGS=['/DEBUG'])
 
-		elif (env["target"]=="test"):
+        ## Architecture
 
-			env.Append(CCFLAGS=['/O2','/DDEBUG_ENABLED','/DD3D_DEBUG_INFO'])
-			env.Append(LINKFLAGS=['/SUBSYSTEM:CONSOLE'])
+        # Note: this detection/override code from here onward should be here instead of in SConstruct because it's platform and compiler specific (MSVC/Windows)
+        if (env["bits"] != "default"):
+            print("Error: bits argument is disabled for MSVC")
+            print("""
+                Bits argument is not supported for MSVC compilation. Architecture depends on the Native/Cross Compile Tools Prompt/Developer Console
+                (or Visual Studio settings) that is being used to run SCons. As a consequence, bits argument is disabled. Run scons again without bits
+                argument (example: scons p=windows) and SCons will attempt to detect what MSVC compiler will be executed and inform you.
+                """)
+            sys.exit()
 
-		elif (env["target"]=="debug"):
+        # Forcing bits argument because MSVC does not have a flag to set this through SCons... it's different compilers (cl.exe's) called from the proper command prompt
+        # that decide the architecture that is build for. Scons can only detect the os.getenviron (because vsvarsall.bat sets a lot of stuff for cl.exe to work with)
+        env["bits"] = "32"
+        env["x86_libtheora_opt_vc"] = True
 
-			env.Append(CCFLAGS=['/Zi','/DDEBUG_ENABLED','/DD3D_DEBUG_INFO','/O1'])
-			env.Append(LINKFLAGS=['/SUBSYSTEM:CONSOLE'])
-			env.Append(LINKFLAGS=['/DEBUG'])
+        ## Compiler configuration
 
-		elif (env["target"]=="profile"):
+        env['ENV'] = os.environ
+        # This detection function needs the tools env (that is env['ENV'], not SCons's env), and that is why it's this far bellow in the code
+        compiler_version_str = methods.detect_visual_c_compiler_version(env['ENV'])
 
-			env.Append(CCFLAGS=['-g','-pg'])
-			env.Append(LINKFLAGS=['-pg'])
+        print("Detected MSVC compiler: " + compiler_version_str)
+        # If building for 64bit architecture, disable assembly optimisations for 32 bit builds (theora as of writting)... vc compiler for 64bit can not compile _asm
+        if(compiler_version_str == "amd64" or compiler_version_str == "x86_amd64"):
+            env["bits"] = "64"
+            env["x86_libtheora_opt_vc"] = False
+            print("Compiled program architecture will be a 64 bit executable (forcing bits=64).")
+        elif (compiler_version_str == "x86" or compiler_version_str == "amd64_x86"):
+            print("Compiled program architecture will be a 32 bit executable. (forcing bits=32).")
+        else:
+            print("Failed to detect MSVC compiler architecture version... Defaulting to 32bit executable settings (forcing bits=32). Compilation attempt will continue, but SCons can not detect for what architecture this build is compiled for. You should check your settings/compilation setup.")
 
-		env.Append(CCFLAGS=['/MT','/Gd','/GR','/nologo'])
-		env.Append(CXXFLAGS=['/TP'])
-		env.Append(CPPFLAGS=['/DMSVC', '/GR', ])
-		env.Append(CCFLAGS=['/I'+os.getenv("WindowsSdkDir")+"/Include"])
-		env.Append(CCFLAGS=['/DWINDOWS_ENABLED'])
-		env.Append(CCFLAGS=['/DRTAUDIO_ENABLED'])
-		env.Append(CCFLAGS=['/DWIN32'])
-		env.Append(CCFLAGS=['/DTYPED_METHOD_BIND'])
+        ## Compile flags
 
-		env.Append(CCFLAGS=['/DGLES2_ENABLED'])
-		env.Append(CCFLAGS=['/DGLES1_ENABLED'])
-		env.Append(CCFLAGS=['/DGLEW_ENABLED'])
-		env.Append(LIBS=['winmm','opengl32','dsound','kernel32','ole32','user32','gdi32', 'IPHLPAPI', 'wsock32', 'shell32','advapi32'])
-		
-		env.Append(LIBPATH=[os.getenv("WindowsSdkDir")+"/Lib"])
-                if (os.getenv("DXSDK_DIR")):
-                        DIRECTX_PATH=os.getenv("DXSDK_DIR")
-                else:
-                        DIRECTX_PATH="C:/Program Files/Microsoft DirectX SDK (March 2009)"
+        env.Append(CCFLAGS=['/MT', '/Gd', '/GR', '/nologo'])
+        env.Append(CXXFLAGS=['/TP'])
+        env.Append(CPPFLAGS=['/DMSVC', '/GR', ])
+        env.Append(CCFLAGS=['/I' + os.getenv("WindowsSdkDir") + "/Include"])
 
-                if (os.getenv("VCINSTALLDIR")):
-                        VC_PATH=os.getenv("VCINSTALLDIR")
-                else:
-                        VC_PATH=""
+        env.Append(CCFLAGS=['/DWINDOWS_ENABLED'])
+        env.Append(CCFLAGS=['/DOPENGL_ENABLED'])
+        env.Append(CCFLAGS=['/DRTAUDIO_ENABLED'])
+        env.Append(CCFLAGS=['/DWASAPI_ENABLED'])
+        env.Append(CCFLAGS=['/DTYPED_METHOD_BIND'])
+        env.Append(CCFLAGS=['/DWIN32'])
+        env.Append(CCFLAGS=['/DWINVER=%s' % winver, '/D_WIN32_WINNT=%s' % winver])
+        if env["bits"] == "64":
+            env.Append(CCFLAGS=['/D_WIN64'])
 
-		env.Append(CCFLAGS=["/I" + p for p in os.getenv("INCLUDE").split(";")])
-		env.Append(LIBPATH=[p for p in os.getenv("LIB").split(";")])
-		env.Append(CCFLAGS=["/I"+DIRECTX_PATH+"/Include"])
-		env.Append(LIBPATH=[DIRECTX_PATH+"/Lib/x86"])
-		env['ENV'] = os.environ;
-	else:
-		#build using mingw
-		if (os.name=="nt"):
-			env['ENV']['TMP'] = os.environ['TMP'] #way to go scons, you can be so stupid sometimes
+        LIBS = ['winmm', 'opengl32', 'dsound', 'kernel32', 'ole32', 'oleaut32', 'user32', 'gdi32', 'IPHLPAPI', 'Shlwapi', 'wsock32', 'Ws2_32', 'shell32', 'advapi32', 'dinput8', 'dxguid']
+        env.Append(LINKFLAGS=[p + env["LIBSUFFIX"] for p in LIBS])
 
-		mingw_prefix=""
+        env.Append(LIBPATH=[os.getenv("WindowsSdkDir") + "/Lib"])
 
-		if (env["force_32_bits"]!="no"):
-			env['OBJSUFFIX'] = ".32"+env['OBJSUFFIX']
-			env['LIBSUFFIX'] = ".32"+env['LIBSUFFIX']
-			env.Append(CCFLAGS=['-m32'])
-			env.Append(LINKFLAGS=['-m32'])
-			env.Append(LINKFLAGS=['-static-libgcc'])
-			env.Append(LINKFLAGS=['-static-libstdc++'])
+        if (os.getenv("VCINSTALLDIR")):
+            VC_PATH = os.getenv("VCINSTALLDIR")
+        else:
+            VC_PATH = ""
 
+        env.Append(CCFLAGS=["/I" + p for p in os.getenv("INCLUDE").split(";")])
+        env.Append(LIBPATH=[p for p in os.getenv("LIB").split(";")])
 
+        # Incremental linking fix
+        env['BUILDERS']['ProgramOriginal'] = env['BUILDERS']['Program']
+        env['BUILDERS']['Program'] = methods.precious_program
 
+    else: # MinGW
 
-		if (env["force_64_bits"]!="no"):
-			mingw_prefix=env["mingw_prefix_64"];
-			env['OBJSUFFIX'] = ".64"+env['OBJSUFFIX']
-			env['LIBSUFFIX'] = ".64"+env['LIBSUFFIX']
-			env.Append(LINKFLAGS=['-static'])
-		else:
-			mingw_prefix=env["mingw_prefix"];
+        # Workaround for MinGW. See:
+        # http://www.scons.org/wiki/LongCmdLinesOnWin32
+        env.use_windows_spawn_fix()
 
-		if (env["target"]=="release"):
-			
-			env.Append(CCFLAGS=['-O3','-ffast-math','-fomit-frame-pointer','-msse2'])
-			env['OBJSUFFIX'] = "_opt"+env['OBJSUFFIX']
-			env['LIBSUFFIX'] = "_opt"+env['LIBSUFFIX']
-		elif (env["target"]=="release_debug"):
+        ## Build type
 
-			env.Append(CCFLAGS=['-O2','-DDEBUG_ENABLED'])
-			env['OBJSUFFIX'] = "_optd"+env['OBJSUFFIX']
-			env['LIBSUFFIX'] = "_optd"+env['LIBSUFFIX']
+        if (env["target"] == "release"):
+            env.Append(CCFLAGS=['-msse2'])
 
-		elif (env["target"]=="debug"):
-					
-			env.Append(CCFLAGS=['-g', '-Wall','-DDEBUG_ENABLED'])
-		elif (env["target"]=="release_tools"):
+            if (env["bits"] == "64"):
+                env.Append(CCFLAGS=['-O3'])
+            else:
+                env.Append(CCFLAGS=['-O2'])
 
-			env.Append(CCFLAGS=['-O2','-Wall','-DDEBUG_ENABLED'])
+            env.Append(LINKFLAGS=['-Wl,--subsystem,windows'])
 
+            if (env["debug_symbols"] == "yes"):
+               env.Prepend(CCFLAGS=['-g1'])
+            if (env["debug_symbols"] == "full"):
+               env.Prepend(CCFLAGS=['-g2'])
 
-		if (env["freetype"]!="no"):
-			env.Append(CCFLAGS=['-DFREETYPE_ENABLED'])
-			env.Append(CPPPATH=['#tools/freetype'])
-			env.Append(CPPPATH=['#tools/freetype/freetype/include'])
+        elif (env["target"] == "release_debug"):
+            env.Append(CCFLAGS=['-O2', '-DDEBUG_ENABLED'])
+            if (env["debug_symbols"] == "yes"):
+               env.Prepend(CCFLAGS=['-g1'])
+            if (env["debug_symbols"] == "full"):
+               env.Prepend(CCFLAGS=['-g2'])
 
-		env["CC"]=mingw_prefix+"gcc"
-		env['AS']=mingw_prefix+"as"
-		env['CXX'] = mingw_prefix+"g++"
-		env['AR'] = mingw_prefix+"ar"
-		env['RANLIB'] = mingw_prefix+"ranlib"
-		env['LD'] = mingw_prefix+"g++"
+        elif (env["target"] == "debug"):
+            env.Append(CCFLAGS=['-g3', '-DDEBUG_ENABLED', '-DDEBUG_MEMORY_ENABLED'])
 
-		#env['CC'] = "winegcc"
-		#env['CXX'] = "wineg++"
+        ## Compiler configuration
 
-		env.Append(CCFLAGS=['-DWINDOWS_ENABLED','-mwindows'])
-		env.Append(CPPFLAGS=['-DRTAUDIO_ENABLED'])
-		env.Append(CCFLAGS=['-DGLES2_ENABLED','-DGLES1_ENABLED','-DGLEW_ENABLED'])
-		env.Append(LIBS=['mingw32','opengl32', 'dsound', 'ole32', 'd3d9','winmm','gdi32','iphlpapi','wsock32','kernel32'])
-		#'d3dx9d'
-		env.Append(CPPFLAGS=['-DMINGW_ENABLED'])
-		env.Append(LINKFLAGS=['-g'])
+        if (os.name == "nt"):
+            env['ENV']['TMP'] = os.environ['TMP']  # way to go scons, you can be so stupid sometimes
+        else:
+            env["PROGSUFFIX"] = env["PROGSUFFIX"] + ".exe"  # for linux cross-compilation
 
-	import methods
-	env.Append( BUILDERS = { 'GLSL120' : env.Builder(action = methods.build_legacygl_headers, suffix = 'glsl.h',src_suffix = '.glsl') } )
-	env.Append( BUILDERS = { 'GLSL' : env.Builder(action = methods.build_glsl_headers, suffix = 'glsl.h',src_suffix = '.glsl') } )
-	env.Append( BUILDERS = { 'HLSL9' : env.Builder(action = methods.build_hlsl_dx9_headers, suffix = 'hlsl.h',src_suffix = '.hlsl') } )
-	env.Append( BUILDERS = { 'GLSL120GLES' : env.Builder(action = methods.build_gles2_headers, suffix = 'glsl.h',src_suffix = '.glsl') } )
+        if (env["bits"] == "default"):
+            if (os.name == "nt"):
+                env["bits"] = "64" if "PROGRAMFILES(X86)" in os.environ else "32"
+            else: # default to 64-bit on Linux
+                env["bits"] = "64"
 
-	
+        mingw_prefix = ""
 
+        if (env["bits"] == "32"):
+            env.Append(LINKFLAGS=['-static'])
+            env.Append(LINKFLAGS=['-static-libgcc'])
+            env.Append(LINKFLAGS=['-static-libstdc++'])
+            mingw_prefix = env["mingw_prefix_32"]
+        else:
+            env.Append(LINKFLAGS=['-static'])
+            mingw_prefix = env["mingw_prefix_64"]
+
+        env["CC"] = mingw_prefix + "gcc"
+        env['AS'] = mingw_prefix + "as"
+        env['CXX'] = mingw_prefix + "g++"
+        env['AR'] = mingw_prefix + "gcc-ar"
+        env['RANLIB'] = mingw_prefix + "gcc-ranlib"
+        env['LD'] = mingw_prefix + "g++"
+        env["x86_libtheora_opt_gcc"] = True
+
+        if env['use_lto']:
+            env.Append(CCFLAGS=['-flto'])
+            env.Append(LINKFLAGS=['-flto=' + str(env.GetOption("num_jobs"))])
+
+        ## Compile flags
+
+        env.Append(CCFLAGS=['-DWINDOWS_ENABLED', '-mwindows'])
+        env.Append(CCFLAGS=['-DOPENGL_ENABLED'])
+        env.Append(CCFLAGS=['-DRTAUDIO_ENABLED'])
+        env.Append(CCFLAGS=['-DWASAPI_ENABLED'])
+        env.Append(CCFLAGS=['-DWINVER=%s' % winver, '-D_WIN32_WINNT=%s' % winver])
+        env.Append(LIBS=['mingw32', 'opengl32', 'dsound', 'ole32', 'd3d9', 'winmm', 'gdi32', 'iphlpapi', 'shlwapi', 'wsock32', 'ws2_32', 'kernel32', 'oleaut32', 'dinput8', 'dxguid', 'ksuser'])
+
+        env.Append(CPPFLAGS=['-DMINGW_ENABLED'])
+
+        # resrc
+        env.Append(BUILDERS={'RES': env.Builder(action=build_res_file, suffix='.o', src_suffix='.rc')})

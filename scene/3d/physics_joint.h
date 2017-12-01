@@ -3,9 +3,10 @@
 /*************************************************************************/
 /*                       This file is part of:                           */
 /*                           GODOT ENGINE                                */
-/*                    http://www.godotengine.org                         */
+/*                      https://godotengine.org                          */
 /*************************************************************************/
-/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2007-2017 Juan Linietsky, Ariel Manzur.                 */
+/* Copyright (c) 2014-2017 Godot Engine contributors (cf. AUTHORS.md)    */
 /*                                                                       */
 /* Permission is hereby granted, free of charge, to any person obtaining */
 /* a copy of this software and associated documentation files (the       */
@@ -29,76 +30,295 @@
 #ifndef PHYSICS_JOINT_H
 #define PHYSICS_JOINT_H
 
-#include "scene/3d/spatial.h"
 #include "scene/3d/physics_body.h"
+#include "scene/3d/spatial.h"
 
-#if 0
-class PhysicsJoint : public Spatial {
+class Joint : public Spatial {
 
-	OBJ_TYPE(PhysicsJoint,Spatial);
-	OBJ_CATEGORY("3D Physics Nodes");
+	GDCLASS(Joint, Spatial);
 
-	NodePath body_A;
-	NodePath body_B;
-	bool active;
-	bool no_collision;
-
-
-	RID indicator_instance;
-
-	RID _get_visual_instance_rid() const;
-protected:
+	RID ba, bb;
 
 	RID joint;
-	RID indicator;
 
-	bool _set(const StringName& p_name, const Variant& p_value);
-	bool _get(const StringName& p_name,Variant &r_ret) const;
-	void _get_property_list( List<PropertyInfo> *p_list) const;
-	void _notification(int p_what);
-	static void _bind_methods();
+	NodePath a;
+	NodePath b;
 
-	virtual RID create(PhysicsBody*A,PhysicsBody*B)=0;
-	virtual void _update_indicator()=0;
-
-	void _disconnect();
-	void _connect();
-public:
-
-	void set_body_A(const NodePath& p_path);
-	void set_body_B(const NodePath& p_path);
-	NodePath get_body_A() const;
-	NodePath get_body_B() const;
-
-	void set_active(bool p_active);
-	bool is_active() const;
-
-	void set_disable_collision(bool p_active);
-	bool has_disable_collision() const;
-
-	void reconnect();
-
-	RID get_rid();
-
-	PhysicsJoint();
-	~PhysicsJoint();
-};
-
-
-
-class PhysicsJointPin : public PhysicsJoint {
-
-	OBJ_TYPE( PhysicsJointPin, PhysicsJoint );
+	int solver_priority;
+	bool exclude_from_collision;
 
 protected:
+	void _update_joint(bool p_only_free = false);
 
-	virtual void _update_indicator();
-	virtual RID create(PhysicsBody*A,PhysicsBody*B);
+	void _notification(int p_what);
+
+	virtual RID _configure_joint(PhysicsBody *body_a, PhysicsBody *body_b) = 0;
+
+	static void _bind_methods();
+
 public:
+	void set_node_a(const NodePath &p_node_a);
+	NodePath get_node_a() const;
 
+	void set_node_b(const NodePath &p_node_b);
+	NodePath get_node_b() const;
 
-	PhysicsJointPin();
+	void set_solver_priority(int p_priority);
+	int get_solver_priority() const;
+
+	void set_exclude_nodes_from_collision(bool p_enable);
+	bool get_exclude_nodes_from_collision() const;
+
+	RID get_joint() const { return joint; }
+	Joint();
 };
 
+///////////////////////////////////////////
+
+class PinJoint : public Joint {
+
+	GDCLASS(PinJoint, Joint);
+
+public:
+	enum Param {
+		PARAM_BIAS = PhysicsServer::PIN_JOINT_BIAS,
+		PARAM_DAMPING = PhysicsServer::PIN_JOINT_DAMPING,
+		PARAM_IMPULSE_CLAMP = PhysicsServer::PIN_JOINT_IMPULSE_CLAMP
+	};
+
+protected:
+	float params[3];
+	virtual RID _configure_joint(PhysicsBody *body_a, PhysicsBody *body_b);
+	static void _bind_methods();
+
+public:
+	void set_param(Param p_param, float p_value);
+	float get_param(Param p_param) const;
+
+	PinJoint();
+};
+
+VARIANT_ENUM_CAST(PinJoint::Param);
+
+class HingeJoint : public Joint {
+
+	GDCLASS(HingeJoint, Joint);
+
+public:
+	enum Param {
+		PARAM_BIAS = PhysicsServer::HINGE_JOINT_BIAS,
+		PARAM_LIMIT_UPPER = PhysicsServer::HINGE_JOINT_LIMIT_UPPER,
+		PARAM_LIMIT_LOWER = PhysicsServer::HINGE_JOINT_LIMIT_LOWER,
+		PARAM_LIMIT_BIAS = PhysicsServer::HINGE_JOINT_LIMIT_BIAS,
+		PARAM_LIMIT_SOFTNESS = PhysicsServer::HINGE_JOINT_LIMIT_SOFTNESS,
+		PARAM_LIMIT_RELAXATION = PhysicsServer::HINGE_JOINT_LIMIT_RELAXATION,
+		PARAM_MOTOR_TARGET_VELOCITY = PhysicsServer::HINGE_JOINT_MOTOR_TARGET_VELOCITY,
+		PARAM_MOTOR_MAX_IMPULSE = PhysicsServer::HINGE_JOINT_MOTOR_MAX_IMPULSE,
+		PARAM_MAX = PhysicsServer::HINGE_JOINT_MAX
+	};
+
+	enum Flag {
+		FLAG_USE_LIMIT = PhysicsServer::HINGE_JOINT_FLAG_USE_LIMIT,
+		FLAG_ENABLE_MOTOR = PhysicsServer::HINGE_JOINT_FLAG_ENABLE_MOTOR,
+		FLAG_MAX = PhysicsServer::HINGE_JOINT_FLAG_MAX
+	};
+
+protected:
+	float params[PARAM_MAX];
+	bool flags[FLAG_MAX];
+	virtual RID _configure_joint(PhysicsBody *body_a, PhysicsBody *body_b);
+	static void _bind_methods();
+
+	void _set_upper_limit(float p_limit);
+	float _get_upper_limit() const;
+
+	void _set_lower_limit(float p_limit);
+	float _get_lower_limit() const;
+
+public:
+	void set_param(Param p_param, float p_value);
+	float get_param(Param p_param) const;
+
+	void set_flag(Flag p_flag, bool p_value);
+	bool get_flag(Flag p_flag) const;
+
+	HingeJoint();
+};
+
+VARIANT_ENUM_CAST(HingeJoint::Param);
+VARIANT_ENUM_CAST(HingeJoint::Flag);
+
+class SliderJoint : public Joint {
+
+	GDCLASS(SliderJoint, Joint);
+
+public:
+	enum Param {
+		PARAM_LINEAR_LIMIT_UPPER = PhysicsServer::SLIDER_JOINT_LINEAR_LIMIT_UPPER,
+		PARAM_LINEAR_LIMIT_LOWER = PhysicsServer::SLIDER_JOINT_LINEAR_LIMIT_LOWER,
+		PARAM_LINEAR_LIMIT_SOFTNESS = PhysicsServer::SLIDER_JOINT_LINEAR_LIMIT_SOFTNESS,
+		PARAM_LINEAR_LIMIT_RESTITUTION = PhysicsServer::SLIDER_JOINT_LINEAR_LIMIT_RESTITUTION,
+		PARAM_LINEAR_LIMIT_DAMPING = PhysicsServer::SLIDER_JOINT_LINEAR_LIMIT_DAMPING,
+		PARAM_LINEAR_MOTION_SOFTNESS = PhysicsServer::SLIDER_JOINT_LINEAR_MOTION_SOFTNESS,
+		PARAM_LINEAR_MOTION_RESTITUTION = PhysicsServer::SLIDER_JOINT_LINEAR_MOTION_RESTITUTION,
+		PARAM_LINEAR_MOTION_DAMPING = PhysicsServer::SLIDER_JOINT_LINEAR_MOTION_DAMPING,
+		PARAM_LINEAR_ORTHOGONAL_SOFTNESS = PhysicsServer::SLIDER_JOINT_LINEAR_ORTHOGONAL_SOFTNESS,
+		PARAM_LINEAR_ORTHOGONAL_RESTITUTION = PhysicsServer::SLIDER_JOINT_LINEAR_ORTHOGONAL_RESTITUTION,
+		PARAM_LINEAR_ORTHOGONAL_DAMPING = PhysicsServer::SLIDER_JOINT_LINEAR_ORTHOGONAL_DAMPING,
+
+		PARAM_ANGULAR_LIMIT_UPPER = PhysicsServer::SLIDER_JOINT_ANGULAR_LIMIT_UPPER,
+		PARAM_ANGULAR_LIMIT_LOWER = PhysicsServer::SLIDER_JOINT_ANGULAR_LIMIT_LOWER,
+		PARAM_ANGULAR_LIMIT_SOFTNESS = PhysicsServer::SLIDER_JOINT_ANGULAR_LIMIT_SOFTNESS,
+		PARAM_ANGULAR_LIMIT_RESTITUTION = PhysicsServer::SLIDER_JOINT_ANGULAR_LIMIT_RESTITUTION,
+		PARAM_ANGULAR_LIMIT_DAMPING = PhysicsServer::SLIDER_JOINT_ANGULAR_LIMIT_DAMPING,
+		PARAM_ANGULAR_MOTION_SOFTNESS = PhysicsServer::SLIDER_JOINT_ANGULAR_MOTION_SOFTNESS,
+		PARAM_ANGULAR_MOTION_RESTITUTION = PhysicsServer::SLIDER_JOINT_ANGULAR_MOTION_RESTITUTION,
+		PARAM_ANGULAR_MOTION_DAMPING = PhysicsServer::SLIDER_JOINT_ANGULAR_MOTION_DAMPING,
+		PARAM_ANGULAR_ORTHOGONAL_SOFTNESS = PhysicsServer::SLIDER_JOINT_ANGULAR_ORTHOGONAL_SOFTNESS,
+		PARAM_ANGULAR_ORTHOGONAL_RESTITUTION = PhysicsServer::SLIDER_JOINT_ANGULAR_ORTHOGONAL_RESTITUTION,
+		PARAM_ANGULAR_ORTHOGONAL_DAMPING = PhysicsServer::SLIDER_JOINT_ANGULAR_ORTHOGONAL_DAMPING,
+		PARAM_MAX = PhysicsServer::SLIDER_JOINT_MAX
+
+	};
+
+protected:
+	void _set_upper_limit_angular(float p_limit_angular);
+	float _get_upper_limit_angular() const;
+
+	void _set_lower_limit_angular(float p_limit_angular);
+	float _get_lower_limit_angular() const;
+
+	float params[PARAM_MAX];
+	virtual RID _configure_joint(PhysicsBody *body_a, PhysicsBody *body_b);
+	static void _bind_methods();
+
+public:
+	void set_param(Param p_param, float p_value);
+	float get_param(Param p_param) const;
+
+	SliderJoint();
+};
+
+VARIANT_ENUM_CAST(SliderJoint::Param);
+
+class ConeTwistJoint : public Joint {
+
+	GDCLASS(ConeTwistJoint, Joint);
+
+public:
+	enum Param {
+
+		PARAM_SWING_SPAN,
+		PARAM_TWIST_SPAN,
+		PARAM_BIAS,
+		PARAM_SOFTNESS,
+		PARAM_RELAXATION,
+		PARAM_MAX
+	};
+
+protected:
+	void _set_swing_span(float p_limit_angular);
+	float _get_swing_span() const;
+
+	void _set_twist_span(float p_limit_angular);
+	float _get_twist_span() const;
+
+	float params[PARAM_MAX];
+	virtual RID _configure_joint(PhysicsBody *body_a, PhysicsBody *body_b);
+	static void _bind_methods();
+
+public:
+	void set_param(Param p_param, float p_value);
+	float get_param(Param p_param) const;
+
+	ConeTwistJoint();
+};
+
+VARIANT_ENUM_CAST(ConeTwistJoint::Param);
+
+class Generic6DOFJoint : public Joint {
+
+	GDCLASS(Generic6DOFJoint, Joint);
+
+public:
+	enum Param {
+
+		PARAM_LINEAR_LOWER_LIMIT = PhysicsServer::G6DOF_JOINT_LINEAR_LOWER_LIMIT,
+		PARAM_LINEAR_UPPER_LIMIT = PhysicsServer::G6DOF_JOINT_LINEAR_UPPER_LIMIT,
+		PARAM_LINEAR_LIMIT_SOFTNESS = PhysicsServer::G6DOF_JOINT_LINEAR_LIMIT_SOFTNESS,
+		PARAM_LINEAR_RESTITUTION = PhysicsServer::G6DOF_JOINT_LINEAR_RESTITUTION,
+		PARAM_LINEAR_DAMPING = PhysicsServer::G6DOF_JOINT_LINEAR_DAMPING,
+		PARAM_ANGULAR_LOWER_LIMIT = PhysicsServer::G6DOF_JOINT_ANGULAR_LOWER_LIMIT,
+		PARAM_ANGULAR_UPPER_LIMIT = PhysicsServer::G6DOF_JOINT_ANGULAR_UPPER_LIMIT,
+		PARAM_ANGULAR_LIMIT_SOFTNESS = PhysicsServer::G6DOF_JOINT_ANGULAR_LIMIT_SOFTNESS,
+		PARAM_ANGULAR_DAMPING = PhysicsServer::G6DOF_JOINT_ANGULAR_DAMPING,
+		PARAM_ANGULAR_RESTITUTION = PhysicsServer::G6DOF_JOINT_ANGULAR_RESTITUTION,
+		PARAM_ANGULAR_FORCE_LIMIT = PhysicsServer::G6DOF_JOINT_ANGULAR_FORCE_LIMIT,
+		PARAM_ANGULAR_ERP = PhysicsServer::G6DOF_JOINT_ANGULAR_ERP,
+		PARAM_ANGULAR_MOTOR_TARGET_VELOCITY = PhysicsServer::G6DOF_JOINT_ANGULAR_MOTOR_TARGET_VELOCITY,
+		PARAM_ANGULAR_MOTOR_FORCE_LIMIT = PhysicsServer::G6DOF_JOINT_ANGULAR_MOTOR_FORCE_LIMIT,
+		PARAM_MAX = PhysicsServer::G6DOF_JOINT_MAX,
+	};
+
+	enum Flag {
+		FLAG_ENABLE_LINEAR_LIMIT = PhysicsServer::G6DOF_JOINT_FLAG_ENABLE_LINEAR_LIMIT,
+		FLAG_ENABLE_ANGULAR_LIMIT = PhysicsServer::G6DOF_JOINT_FLAG_ENABLE_ANGULAR_LIMIT,
+		FLAG_ENABLE_MOTOR = PhysicsServer::G6DOF_JOINT_FLAG_ENABLE_MOTOR,
+		FLAG_MAX = PhysicsServer::G6DOF_JOINT_FLAG_MAX
+	};
+
+protected:
+	void _set_angular_hi_limit_x(float p_limit_angular);
+	float _get_angular_hi_limit_x() const;
+
+	void _set_angular_hi_limit_y(float p_limit_angular);
+	float _get_angular_hi_limit_y() const;
+
+	void _set_angular_hi_limit_z(float p_limit_angular);
+	float _get_angular_hi_limit_z() const;
+
+	void _set_angular_lo_limit_x(float p_limit_angular);
+	float _get_angular_lo_limit_x() const;
+
+	void _set_angular_lo_limit_y(float p_limit_angular);
+	float _get_angular_lo_limit_y() const;
+
+	void _set_angular_lo_limit_z(float p_limit_angular);
+	float _get_angular_lo_limit_z() const;
+
+	float params_x[PARAM_MAX];
+	bool flags_x[FLAG_MAX];
+	float params_y[PARAM_MAX];
+	bool flags_y[FLAG_MAX];
+	float params_z[PARAM_MAX];
+	bool flags_z[FLAG_MAX];
+
+	virtual RID _configure_joint(PhysicsBody *body_a, PhysicsBody *body_b);
+	static void _bind_methods();
+
+public:
+	void set_param_x(Param p_param, float p_value);
+	float get_param_x(Param p_param) const;
+
+	void set_param_y(Param p_param, float p_value);
+	float get_param_y(Param p_param) const;
+
+	void set_param_z(Param p_param, float p_value);
+	float get_param_z(Param p_param) const;
+
+	void set_flag_x(Flag p_flag, bool p_enabled);
+	bool get_flag_x(Flag p_flag) const;
+
+	void set_flag_y(Flag p_flag, bool p_enabled);
+	bool get_flag_y(Flag p_flag) const;
+
+	void set_flag_z(Flag p_flag, bool p_enabled);
+	bool get_flag_z(Flag p_flag) const;
+
+	Generic6DOFJoint();
+};
+
+VARIANT_ENUM_CAST(Generic6DOFJoint::Param);
+VARIANT_ENUM_CAST(Generic6DOFJoint::Flag);
+
 #endif // PHYSICS_JOINT_H
-#endif
